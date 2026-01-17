@@ -24,6 +24,15 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
+      - name: Verify submodules
+        run: |
+          echo "Checking submodules..."
+          ls -la third_party/
+          ls -la third_party/abseil-cpp/ | head -5
+          ls -la third_party/boringssl-with-bazel/ | head -5
+          ls -la third_party/cares/cares/ | head -5
+          echo "Submodules OK"
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -41,21 +50,15 @@ jobs:
           CIBW_ARCHS_LINUX: "x86_64"
           # Use manylinux_2_28 for newer glibc
           CIBW_MANYLINUX_X86_64_IMAGE: "manylinux_2_28"
-          # Install build dependencies
-          CIBW_BEFORE_BUILD: |
-            pip install cython>=3.1.0 setuptools>=77.0.1 wheel packaging
-          # Build with Cython
+          # Build with Cython - pyproject.toml handles deps
           CIBW_ENVIRONMENT: >
             GRPC_PYTHON_BUILD_WITH_CYTHON=1
-            GRPC_PYTHON_BUILD_SYSTEM_OPENSSL=0
-            GRPC_PYTHON_BUILD_SYSTEM_ZLIB=0
-            GRPC_PYTHON_BUILD_SYSTEM_CARES=0
           # Skip PyPy and musllinux
           CIBW_SKIP: "pp* *-musllinux_*"
           # Test the wheel works
           CIBW_TEST_COMMAND: "python -c \"import grpc; print(grpc.__version__)\""
-          # Verbose output
-          CIBW_BUILD_VERBOSITY: 1
+          # More verbose for debugging
+          CIBW_BUILD_VERBOSITY: 2
 
       - name: Upload wheels
         uses: actions/upload-artifact@v4
