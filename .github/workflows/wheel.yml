@@ -1,0 +1,97 @@
+# Build grpcio wheels with free-threading support for Python 3.14t
+name: Build Wheels
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+  workflow_dispatch:
+
+jobs:
+  build_wheels:
+    name: Build wheels on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        # Can add windows-latest, macos-latest later if needed
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install cibuildwheel
+        run: python -m pip install cibuildwheel==3.3.1
+
+      - name: Build wheels
+        run: python -m cibuildwheel --output-dir wheelhouse
+        env:
+          # Only build for Python 3.14 free-threaded
+          CIBW_BUILD: "cp314t-*"
+          # Only manylinux for now (CHS needs Linux)
+          CIBW_ARCHS_LINUX: "x86_64"
+          # Use manylinux_2_28 for newer glibc
+          CIBW_MANYLINUX_X86_64_IMAGE: "manylinux_2_28"
+          # Install build dependencies
+          CIBW_BEFORE_BUILD: |
+            pip install cython>=3.1.0 setuptools>=77.0.1 wheel packaging
+          # Build with Cython
+          CIBW_ENVIRONMENT: >
+            GRPC_PYTHON_BUILD_WITH_CYTHON=1
+            GRPC_PYTHON_BUILD_SYSTEM_OPENSSL=0
+            GRPC_PYTHON_BUILD_SYSTEM_ZLIB=0
+            GRPC_PYTHON_BUILD_SYSTEM_CARES=0
+          # Skip PyPy and musllinux
+          CIBW_SKIP: "pp* *-musllinux_*"
+          # Test the wheel works
+          CIBW_TEST_COMMAND: "python -c \"import grpc; print(grpc.__version__)\""
+          # Verbose output
+          CIBW_BUILD_VERBOSITY: 1
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}
+          path: ./wheelhouse/*.whl
+
+  # Separate job to test free-threading
+  test_freethreading:
+    name: Test free-threading
+    needs: build_wheels
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheels-ubuntu-latest
+          path: wheelhouse
+
+      - name: Set up Python 3.14t
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14t"
+
+      - name: Install and test
+        run: |
+          pip install wheelhouse/*.whl
+          python -c "
+          import sys
+          print(f'Python: {sys.version}')
+          print(f'GIL enabled before import: {sys._is_gil_enabled()}')
+          import grpc
+          print(f'grpc version: {grpc.__version__}')
+          print(f'GIL enabled after import: {sys._is_gil_enabled()}')
+          if sys._is_gil_enabled():
+              print('ERROR: GIL was enabled by grpc import!')
+              sys.exit(1)
+          else:
+              print('SUCCESS: GIL remains disabled after grpc import')
+          "

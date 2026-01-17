@@ -234,7 +234,9 @@ def try_cythonize(extensions, linetracing=False, mandatory=True):
     """
     try:
         # Break import style to ensure we have access to Cython post-setup_requires
+        import Cython
         import Cython.Build
+        from packaging.version import Version
     except ImportError:
         if mandatory:
             sys.stderr.write(
@@ -254,6 +256,9 @@ def try_cythonize(extensions, linetracing=False, mandatory=True):
     if linetracing:
         additional_define_macros = [("CYTHON_TRACE_NOGIL", "1")]
         cython_compiler_directives["linetrace"] = True
+    # Enable free-threading support for Python 3.13+ nogil builds
+    if Version(Cython.__version__) >= Version("3.1.0"):
+        cython_compiler_directives["freethreading_compatible"] = True
     return Cython.Build.cythonize(
         extensions,
         include_path=[
