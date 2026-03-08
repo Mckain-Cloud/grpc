@@ -95,10 +95,29 @@ jobs:
       - name: Install cibuildwheel
         run: python -m pip install cibuildwheel==3.3.1
 
-      - name: Stage grpcio wheel for build container
+      - name: Prepare grpcio-tools source tree
         run: |
-          mkdir -p tools/distrib/python/grpcio_tools/.grpcio-dep
-          cp grpcio-wheelhouse/*.whl tools/distrib/python/grpcio_tools/.grpcio-dep/
+          # Copy source files from repo root into grpcio_tools build directory
+          # (mirrors what make_grpcio_tools.py does)
+          TOOLS_DIR=tools/distrib/python/grpcio_tools
+
+          # grpc_root: compiler sources and includes
+          mkdir -p $TOOLS_DIR/grpc_root/src $TOOLS_DIR/grpc_root/include
+          cp -r src/compiler $TOOLS_DIR/grpc_root/src/
+          cp -r include/* $TOOLS_DIR/grpc_root/include/
+
+          # third_party: abseil, protobuf, utf8_range
+          mkdir -p $TOOLS_DIR/third_party/abseil-cpp
+          cp -r third_party/abseil-cpp/absl $TOOLS_DIR/third_party/abseil-cpp/
+          mkdir -p $TOOLS_DIR/third_party/protobuf/third_party
+          cp -r third_party/protobuf/src $TOOLS_DIR/third_party/protobuf/
+          cp -r third_party/protobuf/upb $TOOLS_DIR/third_party/protobuf/
+          cp -r third_party/protobuf/upb_generator $TOOLS_DIR/third_party/protobuf/
+          cp -r third_party/protobuf/third_party/utf8_range $TOOLS_DIR/third_party/protobuf/third_party/
+
+          # Stage grpcio wheel for dependency resolution inside build container
+          mkdir -p $TOOLS_DIR/.grpcio-dep
+          cp grpcio-wheelhouse/*.whl $TOOLS_DIR/.grpcio-dep/
 
       - name: Build grpcio-tools wheels
         run: python -m cibuildwheel --output-dir wheelhouse tools/distrib/python/grpcio_tools
