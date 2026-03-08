@@ -321,8 +321,17 @@ def extension_modules():
     extensions = [plugin_ext]
     if BUILD_WITH_CYTHON:
         from Cython import Build
+        from packaging.version import Version
+        import Cython
 
-        return Build.cythonize(extensions)
+        cython_compiler_directives = {}
+        if Version(Cython.__version__) >= Version("3.1.0"):
+            cython_compiler_directives["freethreading_compatible"] = True
+
+        return Build.cythonize(
+            extensions,
+            compiler_directives=cython_compiler_directives,
+        )
     else:
         return extensions
 
