@@ -181,3 +181,39 @@ jobs:
           from grpc_tools import protoc
           print('grpcio-tools import OK, GIL still disabled')
           "
+
+  # Create/update a release with both wheels
+  publish_release:
+    name: Publish release
+    needs: test_freethreading
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: grpcio-wheels-ubuntu-latest
+          path: wheelhouse
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: grpcio-tools-wheels-ubuntu-latest
+          path: wheelhouse
+
+      - name: Create or update release
+        run: |
+          GRPCIO_WHL=$(ls wheelhouse/grpcio-*.whl | head -1)
+          VERSION=$(basename $GRPCIO_WHL | grep -oP 'grpcio-\K[0-9.]+(?:\.dev[0-9]+)?' || echo "0.0.0")
+          TAG="v${VERSION}-cp314t"
+
+          # Delete existing release if it exists
+          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+
+          gh release create "$TAG" \
+            --title "grpcio ${VERSION} for Python 3.14t (free-threaded)" \
+            --notes "Pre-built wheels for Python 3.14t free-threaded (cp314t, manylinux_2_28, x86_64)" \
+            --repo ${{ github.repository }} \
+            wheelhouse/*.whl
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
