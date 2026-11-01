@@ -251,6 +251,10 @@ def try_cythonize(extensions, linetracing=False, mandatory=True):
             )
         return extensions
     cython_compiler_directives = {}
+    # Mckain-Cloud/grpc fork patch (grpc/grpc#40820): declare Py_MOD_GIL_NOT_USED so
+    # free-threaded interpreters keep the GIL off when cygrpc loads.
+    if tuple(int(p) for p in Cython.__version__.split(".")[:2]) >= (3, 1):
+        cython_compiler_directives["freethreading_compatible"] = True
     if linetracing:
         additional_define_macros = [("CYTHON_TRACE_NOGIL", "1")]
         cython_compiler_directives["linetrace"] = True
