@@ -1,0 +1,123 @@
+# Mckain-Cloud fork: build free-threaded grpcio wheels (cp314t + cp315t,
+# manylinux_2_28 x86_64), stripped of debug symbols, labelled 1.84.1+ft1.
+name: Build free-threaded grpcio wheels
+
+on:
+  push:
+    branches: [freethreading-1.84.1]
+  pull_request:
+    branches: [freethreading-1.84.1]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build_grpcio:
+    name: Build grpcio (cp314t, cp315t)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v4.3.5
+        with:
+          output-dir: wheelhouse
+        env:
+          CIBW_BUILD: "cp314t-manylinux_x86_64 cp315t-manylinux_x86_64"
+          CIBW_ARCHS_LINUX: "x86_64"
+          CIBW_MANYLINUX_X86_64_IMAGE: "manylinux_2_28"
+          # Regenerate cygrpc.cpp with the freethreading_compatible directive.
+          CIBW_ENVIRONMENT: >-
+            GRPC_PYTHON_BUILD_WITH_CYTHON=1
+            GRPC_PYTHON_BUILD_EXT_COMPILER_JOBS=4
+          # Strip debug info (~200 MB -> ~8 MB) before auditwheel.
+          CIBW_REPAIR_WHEEL_COMMAND_LINUX: >-
+            bash /project/tools/distrib/python/strip_wheel.sh {wheel} &&
+            auditwheel repair -w {dest_dir} {wheel}
+          # Tested in the dedicated job below.
+          CIBW_TEST_SKIP: "*"
+
+      - name: Check wheel sizes
+        run: |
+          ls -l wheelhouse
+          for w in wheelhouse/*.whl; do
+            size=$(stat -c %s "$w")
+            if [ "$size" -gt 52428800 ]; then
+              echo "::error::$w is $size bytes; debug symbols were not stripped"
+              exit 1
+            fi
+          done
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: grpcio-freethreading-wheels
+          path: wheelhouse/*.whl
+          if-no-files-found: error
+
+  test_freethreading:
+    name: Smoke test ${{ matrix.python }}
+    needs: build_grpcio
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: [cp314-cp314t, cp315-cp315t]
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: grpcio-freethreading-wheels
+          path: wheelhouse
+
+      - name: Import grpc and check the GIL stays disabled
+        run: |
+          docker run --rm -v "$PWD/wheelhouse:/wheelhouse:ro" \
+            quay.io/pypa/manylinux_2_34_x86_64:latest bash -euo pipefail -c '
+            PY=/opt/python/${{ matrix.python }}/bin/python
+            $PY -m pip install --no-index --no-deps /wheelhouse/*-${{ matrix.python }}-*.whl
+            $PY -m pip install typing-extensions
+            $PY - <<EOF
+          import sys
+          assert not sys._is_gil_enabled(), "GIL enabled before import"
+          import grpc
+          from grpc._cython import cygrpc
+          print(sys.version)
+          print("grpc", grpc.__version__)
+          assert grpc.__version__ == "1.84.1+ft1", grpc.__version__
+          assert not sys._is_gil_enabled(), "importing grpc re-enabled the GIL"
+          print("OK: GIL still disabled after import grpc")
+          EOF
+          '
+
+  publish_release:
+    name: Publish release v1.84.1-ft1
+    needs: test_freethreading
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: grpcio-freethreading-wheels
+          path: wheelhouse
+
+      - name: Create or replace release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: v1.84.1-ft1
+        run: |
+          gh release delete "$TAG" --yes --cleanup-tag --repo "$GITHUB_REPOSITORY" 2>/dev/null || true
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "grpcio 1.84.1+ft1 for Python 3.14t/3.15t (free-threaded)" \
+            --notes "grpcio 1.84.1 with the Cython freethreading_compatible directive (import grpc keeps the GIL disabled). Stripped cp314t + cp315t manylinux_2_28 x86_64 wheels, built from ${GITHUB_SHA} on branch freethreading-1.84.1." \
+            wheelhouse/*.whl
