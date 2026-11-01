@@ -3,6 +3,8 @@ on: [push]
 permissions: {}
 jobs:
   PRAutoFix:
+    # Mckain-Cloud fork: only run in the upstream repo
+    if: github.repository == 'grpc/grpc'
     permissions:
       actions: write # to cancel/stop running workflows (styfle/cancel-workflow-action)
       contents: write # to create branch (peter-evans/create-pull-request)
